@@ -1,16 +1,43 @@
 const WebSocket = require("ws");
+const admin = require("firebase-admin");
+const serviceAccount = require("./serviceAccountKey.json");
 
-const projectRooms = {};
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+const db = admin.firestore();
 
 const wss = new WebSocket.Server({ port: 8080 });
+const projectRooms = {};
 
-wss.on("connection", (ws, req) => {
+wss.on("connection", async (ws, req) => {
   const apiKey = req.headers["sec-websocket-protocol"];
   const urlParams = new URLSearchParams(req.url.split("?")[1]);
   const channelName = urlParams.get("channel") || "default";
 
-  // TODO: 등록된 apiKey 확인하는 과정 필요
   if (!apiKey) {
+    ws.send(JSON.stringify({ type: "error", message: "API Key is required" }));
+    ws.close();
+    return;
+  }
+
+  try {
+    // 🔥 Firestore에서 API Key 검증
+    const apiKeyDoc = await db.collection("apiKeys").doc(apiKey).get();
+    if (!apiKeyDoc.exists || !apiKeyDoc.data().active) {
+      console.log(`[거부됨] 잘못된 API Key: ${apiKey}`);
+      ws.send(JSON.stringify({ type: "error", message: "Invalid API Key" }));
+      ws.close();
+      return;
+    }
+  } catch (error) {
+    console.error("API Key 검증 중 오류 발생:", error);
+    ws.send(
+      JSON.stringify({
+        type: "error",
+        message: "Server error during API Key validation",
+      })
+    );
     ws.close();
     return;
   }
@@ -33,13 +60,17 @@ wss.on("connection", (ws, req) => {
   ws.on("message", (data) => {
     try {
       const cursorData = JSON.parse(data);
+      const message = { type: "cursor", ...cursorData };
       projectRooms[apiKey][channelName].forEach((client) => {
         if (client !== ws && client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(cursorData));
+          client.send(JSON.stringify(message));
         }
       });
     } catch (error) {
       console.error(`메시지 처리 중 에러 발생: ${error.message}`);
+      ws.send(
+        JSON.stringify({ type: "error", message: "Invalid message format" })
+      );
     }
   });
 
