@@ -1,6 +1,7 @@
 const WebSocket = require("ws");
 const admin = require("firebase-admin");
 const serviceAccount = require("./serviceAccountKey.json");
+const { normalizeUrl } = require("./utils/format");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -21,14 +22,37 @@ wss.on("connection", async (ws, req) => {
     return;
   }
 
+  // API Key 검증
   try {
-    // 🔥 Firestore에서 API Key 검증
     const apiKeyDoc = await db.collection("apiKeys").doc(apiKey).get();
-    if (!apiKeyDoc.exists || !apiKeyDoc.data().active) {
+    const apiKeyData = apiKeyDoc.data();
+
+    if (!apiKeyDoc.exists) {
       console.log(`[거부됨] 잘못된 API Key: ${apiKey}`);
       ws.send(JSON.stringify({ type: "error", message: "Invalid API Key" }));
       ws.close();
       return;
+    }
+
+    // 운영키인 경우 요청 URL 검증
+    if (apiKeyData.isProduction) {
+      const registeredUrl = apiKeyData.url;
+      const origin = req.headers.origin || "";
+
+      if (normalizeUrl(registeredUrl) !== normalizeUrl(origin)) {
+        console.log(
+          `[거부됨] URL 불일치: 요청 ${origin} vs 등록 ${registeredUrl}`
+        );
+        ws.send(
+          JSON.stringify({
+            type: "error",
+            message:
+              "요청 URL이 등록된 URL과 다릅니다. 만약 개발 환경이라면 개발키를 사용해주세요.",
+          })
+        );
+        ws.close();
+        return;
+      }
     }
   } catch (error) {
     console.error("API Key 검증 중 오류 발생:", error);
@@ -90,4 +114,4 @@ wss.on("connection", async (ws, req) => {
   });
 });
 
-console.log("🚀 WebSocket 관리 서버가 8080 포트에서 실행 중...");
+console.log("🚀 CoCursor 서버가 8080 포트에서 실행 중...");
