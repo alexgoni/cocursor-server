@@ -47,7 +47,7 @@ wss.on("connection", async (ws, req) => {
           JSON.stringify({
             type: "error",
             message:
-              "요청 URL이 등록된 URL과 다릅니다. 만약 개발 환경이라면 개발키를 사용해주세요.",
+              "The requested URL does not match the registered URL. If you are in a development environment, please use a development API key.",
           })
         );
         ws.close();
